@@ -1,0 +1,125 @@
+---
+# MPC Joint Analysis System Configuration
+
+# System Settings
+system:
+  name: "MPC Joint Data Analysis System"
+  version: "1.0.0"
+  log_level: "INFO"
+  max_parties: 10
+  default_protocol: "mascot"
+
+# MP-SPDZ Configuration
+mp_spdz:
+  installation_path: "/mnt/c/Users/Lenovo/source/repos/MP-SPDZ"
+  compile_script: "compile.py"
+  default_field_size: 64
+  default_ring_size: 64
+
+# Protocol Settings
+protocols:
+  mascot:
+    security_model: "malicious"
+    adversary_model: "dishonest_majority"
+    supports_preprocessing: true
+    field_size: 64
+    timeout_seconds: 300
+  
+  shamir:
+    security_model: "semi_honest"
+    adversary_model: "honest_majority"
+    supports_preprocessing: false
+    field_size: 64
+    timeout_seconds: 180
+  
+  atlas:
+    security_model: "semi_honest"
+    adversary_model: "honest_majority"
+    supports_preprocessing: false
+    field_size: 64
+    timeout_seconds: 240
+  
+  semi:
+    security_model: "semi_honest"
+    adversary_model: "dishonest_majority"
+    supports_preprocessing: true
+    field_size: 64
+    timeout_seconds: 180
+  
+  semi2k:
+    security_model: "semi_honest"
+    adversary_model: "dishonest_majority"
+    supports_preprocessing: true
+    ring_size: 64
+    timeout_seconds: 180
+
+# Security Configuration
+security:
+  authentication:
+    token_expiry_minutes: 60
+    max_failed_attempts: 5
+    lockout_duration_minutes: 30
+  
+  access_control:
+    default_role: "participant"
+    max_denied_attempts: 5
+    lockout_duration_minutes: 30
+  
+  audit:
+    storage_dir: "audit_logs"
+    max_file_size: 10485760  # 10MB
+    compression: true
+    retention_days: 90
+
+# Privacy Settings
+privacy:
+  differential_privacy:
+    epsilon: 1.0
+    delta: 0.0001
+  
+  k_anonymity:
+    k: 5
+  
+  l_diversity:
+    l: 3
+  
+  default_privacy_level: "medium"
+  suppress_small_counts: true
+  small_count_threshold: 5
+
+# Data Processing
+data_processing:
+  max_input_size_mb: 100
+  supported_formats: ["csv", "json", "parquet"]
+  default_encoding: "utf-8"
+  missing_value_strategies: ["mean", "median", "mode", "drop"]
+  
+# Results Configuration
+results:
+  aggregation:
+    quality_weights: true
+    confidence_weights: true
+    default_quality_threshold: 0.5
+    default_confidence_threshold: 0.5
+  
+  visualization:
+    default_format: "png"
+    default_width: 800
+    default_height: 600
+    default_style: "seaborn"
+    privacy_level: "medium"
+
+# Network Configuration
+network:
+  default_host: "localhost"
+  port_base: 5000
+  ssl_enabled: true
+  cert_dir: "certs"
+  timeout_seconds: 30
+
+# Database Configuration (if needed)
+database:
+  type: "sqlite"
+  path: "mpc_analysis.db"
+  backup_enabled: true
+  backup_interval_hours: 24

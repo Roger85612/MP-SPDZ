@@ -1,0 +1,653 @@
+"""
+Joint Clustering MPC Program
+
+This program implements secure multi-party clustering algorithms that allow
+multiple parties to collaboratively perform clustering analysis without
+revealing their individual datasets.
+
+Features:
+- Secure K-Means Clustering
+- Secure Hierarchical Clustering (Agglomerative)
+- Secure DBSCAN (Density-Based Clustering)
+- Secure Cluster Evaluation (Silhouette Score, Inertia)
+- Privacy-preserving cluster assignment
+"""
+
+from Compiler.types import sint, sfix, cint, cfix, Array, Matrix
+from Compiler.library import print_ln, for_range, if_
+from Compiler.util import if_else
+from Compiler.mpc_math import sqrt
+
+# Configuration parameters
+MAX_PARTIES = 10
+MAX_SAMPLES = 1000
+MAX_FEATURES = 20
+MAX_CLUSTERS = 10
+MAX_ITERATIONS = 100
+CONVERGENCE_THRESHOLD = sfix(1e-4)
+DBSCAN_EPS = sfix(0.5)
+DBSCAN_MIN_POINTS = cint(5)
+
+def secure_euclidean_distance(point1, point2, n_features):
+    """
+    Compute secure Euclidean distance between two points.
+    
+    Args:
+        point1: First point (array of features)
+        point2: Second point (array of features)
+        n_features: Number of features
+    
+    Returns:
+        Euclidean distance
+    """
+    sum_squared_diff = sfix(0)
+    
+    for i in range(n_features):
+        diff = point1[i] - point2[i]
+        sum_squared_diff += diff * diff
+    
+    return sum_squared_diff.sqrt()
+
+def secure_manhattan_distance(point1, point2, n_features):
+    """
+    Compute secure Manhattan (L1) distance between two points.
+    
+    Args:
+        point1: First point
+        point2: Second point
+        n_features: Number of features
+    
+    Returns:
+        Manhattan distance
+    """
+    sum_abs_diff = sfix(0)
+    
+    for i in range(n_features):
+        diff = point1[i] - point2[i]
+        abs_diff = if_else(diff >= 0, diff, -diff)
+        sum_abs_diff += abs_diff
+    
+    return sum_abs_diff
+
+def initialize_centroids_random(data, n_samples, n_features, k):
+    """
+    Initialize k centroids randomly by selecting k data points.
+    
+    Args:
+        data: Data matrix
+        n_samples: Number of samples
+        n_features: Number of features
+        k: Number of clusters
+    
+    Returns:
+        Initial centroids
+    """
+    centroids = Matrix(k, n_features, sfix)
+    
+    # Simple initialization: use first k points as initial centroids
+    # In practice, you might want to use k-means++ initialization
+    for cluster in range(k):
+        sample_idx = cluster * (n_samples // k)  # Distribute evenly
+        for feature in range(n_features):
+            centroids[cluster][feature] = data[sample_idx][feature]
+    
+    return centroids
+
+def secure_kmeans_clustering(data, n_samples, n_features, k, max_iterations):
+    """
+    Secure K-Means clustering algorithm.
+    
+    Args:
+        data: Data matrix (n_samples x n_features)
+        n_samples: Number of samples
+        n_features: Number of features
+        k: Number of clusters
+        max_iterations: Maximum number of iterations
+    
+    Returns:
+        Final centroids and cluster assignments
+    """
+    print_ln("Starting secure K-Means clustering...")
+    print_ln("K = %s, Max iterations = %s", k, max_iterations)
+    
+    # Initialize centroids
+    centroids = initialize_centroids_random(data, n_samples, n_features, k)
+    
+    # Initialize cluster assignments
+    assignments = Array(n_samples, sint)
+    
+    # K-Means iterations
+    for iteration in range(max_iterations):
+        print_ln("K-Means iteration %s", iteration)
+        
+        # Step 1: Assign points to nearest centroids
+        for sample in range(n_samples):
+            min_distance = sfix(999999)  # Large initial value
+            best_cluster = sint(0)
+            
+            for cluster in range(k):
+                # Extract centroid coordinates
+                centroid = Array(n_features, sfix)
+                for feature in range(n_features):
+                    centroid[feature] = centroids[cluster][feature]
+                
+                # Extract data point coordinates
+                point = Array(n_features, sfix)
+                for feature in range(n_features):
+                    point[feature] = data[sample][feature]
+                
+                # Compute distance
+                distance = secure_euclidean_distance(point, centroid, n_features)
+                
+                # Update assignment if this is the closest centroid
+                is_closer = distance < min_distance
+                best_cluster = if_else(is_closer, cluster, best_cluster)
+                min_distance = if_else(is_closer, distance, min_distance)
+            
+            assignments[sample] = best_cluster
+        
+        # Step 2: Update centroids
+        new_centroids = Matrix(k, n_features, sfix)
+        cluster_counts = Array(k, sint)
+        
+        # Initialize
+        for cluster in range(k):
+            cluster_counts[cluster] = sint(0)
+            for feature in range(n_features):
+                new_centroids[cluster][feature] = sfix(0)
+        
+        # Sum points assigned to each cluster
+        for sample in range(n_samples):
+            for cluster in range(k):
+                is_in_cluster = assignments[sample] == cluster
+                cluster_counts[cluster] += if_else(is_in_cluster, 1, 0)
+                
+                for feature in range(n_features):
+                    contribution = if_else(is_in_cluster, data[sample][feature], sfix(0))
+                    new_centroids[cluster][feature] += contribution
+        
+        # Compute new centroids (mean of assigned points)
+        centroid_movement = sfix(0)
+        for cluster in range(k):
+            count = sfix(cluster_counts[cluster])
+            
+            for feature in range(n_features):
+                old_centroid = centroids[cluster][feature]
+                
+                # Avoid division by zero
+                new_centroid = if_else(count > 0, 
+                                     new_centroids[cluster][feature] / count,
+                                     old_centroid)
+                
+                # Track centroid movement for convergence
+                movement = if_else(new_centroid >= old_centroid,
+                                 new_centroid - old_centroid,
+                                 old_centroid - new_centroid)
+                centroid_movement += movement
+                
+                centroids[cluster][feature] = new_centroid
+        
+        # Check convergence
+        print_ln("Centroid movement: %s", centroid_movement.reveal())
+        
+        # Simple convergence check (in practice, you'd be more sophisticated)
+        if iteration > 10 and centroid_movement < CONVERGENCE_THRESHOLD:
+            print_ln("K-Means converged at iteration %s", iteration)
+            break
+    
+    return centroids, assignments
+
+def secure_compute_inertia(data, centroids, assignments, n_samples, n_features, k):
+    """
+    Compute the within-cluster sum of squares (inertia).
+    
+    Args:
+        data: Data matrix
+        centroids: Cluster centroids
+        assignments: Cluster assignments
+        n_samples: Number of samples
+        n_features: Number of features
+        k: Number of clusters
+    
+    Returns:
+        Inertia value
+    """
+    inertia = sfix(0)
+    
+    for sample in range(n_samples):
+        assigned_cluster = assignments[sample]
+        
+        # Extract data point
+        point = Array(n_features, sfix)
+        for feature in range(n_features):
+            point[feature] = data[sample][feature]
+        
+        # Compute squared distance to assigned centroid
+        squared_distance = sfix(0)
+        for cluster in range(k):
+            is_assigned = assigned_cluster == cluster
+            
+            for feature in range(n_features):
+                diff = point[feature] - centroids[cluster][feature]
+                contribution = if_else(is_assigned, diff * diff, sfix(0))
+                squared_distance += contribution
+        
+        inertia += squared_distance
+    
+    return inertia
+
+def secure_silhouette_score(data, assignments, n_samples, n_features, k):
+    """
+    Compute the silhouette score for clustering evaluation.
+    
+    Args:
+        data: Data matrix
+        assignments: Cluster assignments
+        n_samples: Number of samples
+        n_features: Number of features
+        k: Number of clusters
+    
+    Returns:
+        Average silhouette score
+    """
+    print_ln("Computing silhouette score...")
+    
+    silhouette_sum = sfix(0)
+    valid_samples = sint(0)
+    
+    for sample in range(n_samples):
+        assigned_cluster = assignments[sample]
+        
+        # Extract current point
+        point = Array(n_features, sfix)
+        for feature in range(n_features):
+            point[feature] = data[sample][feature]
+        
+        # Compute a(i): mean distance to points in same cluster
+        intra_cluster_distance = sfix(0)
+        intra_cluster_count = sint(0)
+        
+        for other_sample in range(n_samples):
+            if other_sample != sample:
+                is_same_cluster = assignments[other_sample] == assigned_cluster
+                
+                if is_same_cluster:
+                    other_point = Array(n_features, sfix)
+                    for feature in range(n_features):
+                        other_point[feature] = data[other_sample][feature]
+                    
+                    distance = secure_euclidean_distance(point, other_point, n_features)
+                    intra_cluster_distance += distance
+                    intra_cluster_count += 1
+        
+        a_i = if_else(intra_cluster_count > 0,
+                     intra_cluster_distance / sfix(intra_cluster_count),
+                     sfix(0))
+        
+        # Compute b(i): mean distance to nearest cluster
+        min_inter_cluster_distance = sfix(999999)
+        
+        for cluster in range(k):
+            if cluster != assigned_cluster:
+                inter_cluster_distance = sfix(0)
+                inter_cluster_count = sint(0)
+                
+                for other_sample in range(n_samples):
+                    is_in_cluster = assignments[other_sample] == cluster
+                    
+                    if is_in_cluster:
+                        other_point = Array(n_features, sfix)
+                        for feature in range(n_features):
+                            other_point[feature] = data[other_sample][feature]
+                        
+                        distance = secure_euclidean_distance(point, other_point, n_features)
+                        inter_cluster_distance += distance
+                        inter_cluster_count += 1
+                
+                avg_distance = if_else(inter_cluster_count > 0,
+                                     inter_cluster_distance / sfix(inter_cluster_count),
+                                     sfix(999999))
+                
+                min_inter_cluster_distance = if_else(avg_distance < min_inter_cluster_distance,
+                                                   avg_distance,
+                                                   min_inter_cluster_distance)
+        
+        b_i = min_inter_cluster_distance
+        
+        # Compute silhouette coefficient for this sample
+        max_ab = if_else(a_i > b_i, a_i, b_i)
+        silhouette_i = if_else(max_ab > 0, (b_i - a_i) / max_ab, sfix(0))
+        
+        silhouette_sum += silhouette_i
+        valid_samples += 1
+    
+    avg_silhouette = silhouette_sum / sfix(valid_samples)
+    return avg_silhouette
+
+def secure_hierarchical_clustering(data, n_samples, n_features, linkage_method):
+    """
+    Secure hierarchical clustering using agglomerative approach.
+    
+    Args:
+        data: Data matrix
+        n_samples: Number of samples
+        n_features: Number of features
+        linkage_method: 0=single, 1=complete, 2=average
+    
+    Returns:
+        Hierarchical clustering dendrogram information
+    """
+    print_ln("Starting secure hierarchical clustering...")
+    
+    # Initialize distance matrix
+    distance_matrix = Matrix(n_samples, n_samples, sfix)
+    
+    # Compute pairwise distances
+    for i in range(n_samples):
+        for j in range(n_samples):
+            if i == j:
+                distance_matrix[i][j] = sfix(0)
+            elif i < j:
+                point1 = Array(n_features, sfix)
+                point2 = Array(n_features, sfix)
+                
+                for feature in range(n_features):
+                    point1[feature] = data[i][feature]
+                    point2[feature] = data[j][feature]
+                
+                distance = secure_euclidean_distance(point1, point2, n_features)
+                distance_matrix[i][j] = distance
+                distance_matrix[j][i] = distance  # Symmetric
+    
+    # Initialize cluster assignments (each point is its own cluster)
+    cluster_assignments = Array(n_samples, sint)
+    active_clusters = Array(n_samples, sint)
+    
+    for i in range(n_samples):
+        cluster_assignments[i] = i
+        active_clusters[i] = 1  # 1 means active, 0 means merged
+    
+    n_active_clusters = n_samples
+    
+    # Agglomerative clustering steps
+    for step in range(n_samples - 1):
+        if n_active_clusters <= 1:
+            break
+        
+        # Find closest pair of clusters
+        min_distance = sfix(999999)
+        merge_i = sint(0)
+        merge_j = sint(1)
+        
+        for i in range(n_samples):
+            if active_clusters[i] == 1:
+                for j in range(i + 1, n_samples):
+                    if active_clusters[j] == 1:
+                        distance = distance_matrix[i][j]
+                        
+                        is_closer = distance < min_distance
+                        merge_i = if_else(is_closer, i, merge_i)
+                        merge_j = if_else(is_closer, j, merge_j)
+                        min_distance = if_else(is_closer, distance, min_distance)
+        
+        # Merge clusters merge_i and merge_j
+        # Update cluster assignments
+        for k in range(n_samples):
+            was_in_j = cluster_assignments[k] == merge_j
+            cluster_assignments[k] = if_else(was_in_j, merge_i, cluster_assignments[k])
+        
+        # Mark cluster j as inactive
+        active_clusters[merge_j] = 0
+        n_active_clusters -= 1
+        
+        # Update distance matrix (simplified linkage)
+        for k in range(n_samples):
+            if k != merge_i and k != merge_j and active_clusters[k] == 1:
+                # Update distances from merged cluster to other clusters
+                if linkage_method == 0:  # Single linkage (minimum)
+                    new_distance = if_else(distance_matrix[merge_i][k] < distance_matrix[merge_j][k],
+                                         distance_matrix[merge_i][k],
+                                         distance_matrix[merge_j][k])
+                elif linkage_method == 1:  # Complete linkage (maximum)
+                    new_distance = if_else(distance_matrix[merge_i][k] > distance_matrix[merge_j][k],
+                                         distance_matrix[merge_i][k],
+                                         distance_matrix[merge_j][k])
+                else:  # Average linkage
+                    new_distance = (distance_matrix[merge_i][k] + distance_matrix[merge_j][k]) / sfix(2)
+                
+                distance_matrix[merge_i][k] = new_distance
+                distance_matrix[k][merge_i] = new_distance
+        
+        print_ln("Hierarchical step %s: merged clusters, min distance: %s", 
+                step, min_distance.reveal())
+    
+    return cluster_assignments
+
+def secure_dbscan_clustering(data, n_samples, n_features, eps, min_points):
+    """
+    Secure DBSCAN clustering algorithm.
+    
+    Args:
+        data: Data matrix
+        n_samples: Number of samples
+        n_features: Number of features
+        eps: Neighborhood radius
+        min_points: Minimum points to form a cluster
+    
+    Returns:
+        Cluster assignments (-1 for noise, 0+ for cluster IDs)
+    """
+    print_ln("Starting secure DBSCAN clustering...")
+    print_ln("eps = %s, min_points = %s", eps.reveal(), min_points)
+    
+    # Initialize labels (-1: noise, 0: unvisited, >0: cluster ID)
+    labels = Array(n_samples, sint)
+    visited = Array(n_samples, sint)
+    
+    for i in range(n_samples):
+        labels[i] = sint(0)  # Unvisited
+        visited[i] = sint(0)  # Not visited
+    
+    cluster_id = sint(1)
+    
+    # Process each point
+    for point_idx in range(n_samples):
+        # Skip if already visited
+        if visited[point_idx] == 1:
+            continue
+        
+        visited[point_idx] = 1
+        
+        # Find neighbors within eps distance
+        neighbors = Array(n_samples, sint)
+        neighbor_count = sint(0)
+        
+        for neighbor_idx in range(n_samples):
+            point1 = Array(n_features, sfix)
+            point2 = Array(n_features, sfix)
+            
+            for feature in range(n_features):
+                point1[feature] = data[point_idx][feature]
+                point2[feature] = data[neighbor_idx][feature]
+            
+            distance = secure_euclidean_distance(point1, point2, n_features)
+            
+            is_neighbor = distance <= eps
+            neighbors[neighbor_idx] = if_else(is_neighbor, 1, 0)
+            neighbor_count += if_else(is_neighbor, 1, 0)
+        
+        # Check if point has enough neighbors to be a core point
+        if neighbor_count >= min_points:
+            # Create new cluster
+            labels[point_idx] = cluster_id
+            
+            # Expand cluster by processing neighbors
+            for neighbor_idx in range(n_samples):
+                if neighbors[neighbor_idx] == 1:
+                    if visited[neighbor_idx] == 0:
+                        visited[neighbor_idx] = 1
+                        
+                        # Find neighbors of neighbor (simplified expansion)
+                        # In full implementation, you'd recursively expand
+                        
+                    # Assign to cluster if not already assigned
+                    is_unassigned = labels[neighbor_idx] == 0
+                    labels[neighbor_idx] = if_else(is_unassigned, cluster_id, labels[neighbor_idx])
+            
+            cluster_id += 1
+        else:
+            # Mark as noise
+            labels[point_idx] = sint(-1)
+    
+    return labels
+
+def secure_optimal_k_selection(data, n_samples, n_features, max_k):
+    """
+    Find optimal number of clusters using elbow method.
+    
+    Args:
+        data: Data matrix
+        n_samples: Number of samples
+        n_features: Number of features
+        max_k: Maximum number of clusters to test
+    
+    Returns:
+        Inertia values for each k
+    """
+    print_ln("Finding optimal number of clusters...")
+    
+    inertia_values = Array(max_k, sfix)
+    
+    for k in range(1, max_k + 1):
+        print_ln("Testing k = %s", k)
+        
+        # Run K-Means
+        centroids, assignments = secure_kmeans_clustering(data, n_samples, n_features, k, 20)
+        
+        # Compute inertia
+        inertia = secure_compute_inertia(data, centroids, assignments, n_samples, n_features, k)
+        inertia_values[k - 1] = inertia
+        
+        print_ln("k = %s, inertia = %s", k, inertia.reveal())
+    
+    return inertia_values
+
+def main():
+    """
+    Main function demonstrating joint clustering analysis.
+    """
+    print_ln("Starting Joint Clustering MPC Program")
+    
+    # Initialize parameters
+    n_parties = cint(3)
+    n_samples_per_party = cint(30)
+    n_features = cint(2)
+    total_samples = n_parties * n_samples_per_party
+    k_clusters = cint(3)
+    
+    print_ln("Configuration:")
+    print_ln("Number of parties: %s", n_parties)
+    print_ln("Samples per party: %s", n_samples_per_party)
+    print_ln("Total samples: %s", total_samples)
+    print_ln("Number of features: %s", n_features)
+    print_ln("Number of clusters: %s", k_clusters)
+    
+    # Initialize data structure
+    data = Matrix(total_samples, n_features, sfix)
+    
+    # Input data from parties
+    print_ln("Reading input data from parties...")
+    for party in range(n_parties):
+        print_ln("Party %s providing data...", party)
+        
+        for sample in range(n_samples_per_party):
+            global_idx = party * n_samples_per_party + sample
+            
+            for feature in range(n_features):
+                data[global_idx][feature] = sfix.get_input_from(party)
+    
+    print_ln("Data input completed. Starting clustering analysis...")
+    
+    # === K-MEANS CLUSTERING ===
+    print_ln("\n=== K-MEANS CLUSTERING ===")
+    
+    centroids, assignments = secure_kmeans_clustering(
+        data, total_samples, n_features, k_clusters, 50
+    )
+    
+    print_ln("Final K-Means Centroids:")
+    for cluster in range(k_clusters):
+        print_ln("Cluster %s centroid:", cluster)
+        for feature in range(n_features):
+            print_ln("  Feature %s: %s", feature, centroids[cluster][feature].reveal())
+    
+    # Compute clustering metrics
+    inertia = secure_compute_inertia(data, centroids, assignments, total_samples, n_features, k_clusters)
+    print_ln("K-Means Inertia: %s", inertia.reveal())
+    
+    silhouette = secure_silhouette_score(data, assignments, total_samples, n_features, k_clusters)
+    print_ln("K-Means Silhouette Score: %s", silhouette.reveal())
+    
+    # Show cluster sizes
+    cluster_sizes = Array(k_clusters, sint)
+    for cluster in range(k_clusters):
+        cluster_sizes[cluster] = sint(0)
+    
+    for sample in range(total_samples):
+        for cluster in range(k_clusters):
+            is_in_cluster = assignments[sample] == cluster
+            cluster_sizes[cluster] += if_else(is_in_cluster, 1, 0)
+    
+    print_ln("Cluster sizes:")
+    for cluster in range(k_clusters):
+        print_ln("Cluster %s: %s samples", cluster, cluster_sizes[cluster].reveal())
+    
+    # === HIERARCHICAL CLUSTERING ===
+    print_ln("\n=== HIERARCHICAL CLUSTERING ===")
+    
+    hierarchical_assignments = secure_hierarchical_clustering(
+        data, total_samples, n_features, 2  # Average linkage
+    )
+    
+    print_ln("Hierarchical clustering completed")
+    
+    # === DBSCAN CLUSTERING ===
+    print_ln("\n=== DBSCAN CLUSTERING ===")
+    
+    dbscan_labels = secure_dbscan_clustering(
+        data, total_samples, n_features, DBSCAN_EPS, DBSCAN_MIN_POINTS
+    )
+    
+    # Count DBSCAN clusters and noise points
+    max_label = sint(-1)
+    noise_count = sint(0)
+    
+    for sample in range(total_samples):
+        label = dbscan_labels[sample]
+        noise_count += if_else(label == -1, 1, 0)
+        max_label = if_else(label > max_label, label, max_label)
+    
+    print_ln("DBSCAN Results:")
+    print_ln("Number of clusters found: %s", max_label.reveal())
+    print_ln("Number of noise points: %s", noise_count.reveal())
+    
+    # === OPTIMAL K SELECTION ===
+    print_ln("\n=== OPTIMAL K SELECTION ===")
+    
+    max_k_test = cint(5)
+    inertia_values = secure_optimal_k_selection(data, total_samples, n_features, max_k_test)
+    
+    print_ln("Elbow Method Results:")
+    for k in range(max_k_test):
+        print_ln("k = %s, inertia = %s", k + 1, inertia_values[k].reveal())
+    
+    print_ln("\nJoint Clustering analysis completed successfully!")
+    print_ln("Summary:")
+    print_ln("- K-Means (k=%s): Inertia = %s, Silhouette = %s", 
+             k_clusters, inertia.reveal(), silhouette.reveal())
+    print_ln("- DBSCAN: %s clusters, %s noise points", 
+             max_label.reveal(), noise_count.reveal())
+    print_ln("- Hierarchical clustering: Completed")
+
+if __name__ == "__main__":
+    main()
