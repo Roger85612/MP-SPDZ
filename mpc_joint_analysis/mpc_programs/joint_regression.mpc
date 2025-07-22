@@ -551,79 +551,27 @@ def main():
     # === LINEAR REGRESSION ===
     print_ln("\n=== LINEAR REGRESSION ===")
     
+    print_ln("=== BUSINESS DISCLOSURE - REGRESSION RESULTS ===")
+    
     # Perform linear regression
     linear_beta = secure_linear_regression(X, y, total_samples, n_features)
     
     print_ln("Linear Regression Coefficients:")
     for i in range(n_features):
-        print_ln("Beta[%s]: %s", i, linear_beta[i][0].reveal())
+        print_ln("BUSINESS_DISCLOSURE - Linear Beta[%s]: %s", i, linear_beta[i][0].reveal())
     
     # Make predictions
     y_pred_linear = secure_predict_linear(X, linear_beta, total_samples, n_features)
     
     # Compute R²
     r_squared = secure_r_squared(y, y_pred_linear, total_samples)
-    print_ln("Linear Regression R²: %s", r_squared.reveal())
+    print_ln("BUSINESS_DISCLOSURE - Linear Regression R²: %s", r_squared.reveal())
     
-    # === RIDGE REGRESSION ===
-    print_ln("\n=== RIDGE REGRESSION ===")
-    
-    lambda_reg = sfix(0.1)
-    ridge_beta = secure_ridge_regression(X, y, total_samples, n_features, lambda_reg)
-    
-    print_ln("Ridge Regression Coefficients (λ = %s):", lambda_reg.reveal())
-    for i in range(n_features):
-        print_ln("Beta[%s]: %s", i, ridge_beta[i][0].reveal())
-    
-    # === LOGISTIC REGRESSION ===
-    print_ln("\n=== LOGISTIC REGRESSION ===")
-    
-    # Perform logistic regression
-    logistic_beta = secure_logistic_regression(
-        X, y_binary, total_samples, n_features, LEARNING_RATE, 50
-    )
-    
-    print_ln("Logistic Regression Coefficients:")
-    for i in range(n_features):
-        print_ln("Beta[%s]: %s", i, logistic_beta[i].reveal())
-    
-    # Make predictions
-    y_pred_logistic = secure_predict_logistic(X, logistic_beta, total_samples, n_features)
-    
-    # Compute accuracy
-    accuracy = secure_accuracy(y_binary, y_pred_logistic, total_samples, sfix(0.5))
-    print_ln("Logistic Regression Accuracy: %s", accuracy.reveal())
-    
-    # === FEATURE SELECTION ===
-    print_ln("\n=== FEATURE SELECTION ===")
-    
-    # Perform correlation-based feature selection
-    feature_scores = secure_feature_selection(X, y, total_samples, n_features, 0)
-    
-    print_ln("Feature Importance Scores (Correlation-based):")
-    for i in range(n_features):
-        print_ln("Feature %s: %s", i, feature_scores[i].reveal())
-    
-    # === CROSS-VALIDATION ===
-    print_ln("\n=== CROSS-VALIDATION ===")
-    
-    n_folds = cint(3)
-    cv_scores = secure_cross_validation(X, y, total_samples, n_features, n_folds)
-    
-    print_ln("Cross-validation R² scores:")
-    cv_mean = sfix(0)
-    for fold in range(n_folds):
-        print_ln("Fold %s: %s", fold, cv_scores[fold].reveal())
-        cv_mean += cv_scores[fold]
-    
-    cv_mean = cv_mean / n_folds
-    print_ln("Mean CV R²: %s", cv_mean.reveal())
+    print_ln("=== BUSINESS MODEL PERFORMANCE SUMMARY ===")
+    print_ln("BUSINESS_DISCLOSURE - Model R²: %s", r_squared.reveal())
+    print_ln("Linear regression analysis completed successfully!")
     
     print_ln("\nJoint Regression analysis completed successfully!")
-    print_ln("Summary:")
-    print_ln("- Linear Regression R²: %s", r_squared.reveal())
-    print_ln("- Logistic Regression Accuracy: %s", accuracy.reveal())
-    print_ln("- Cross-validation Mean R²: %s", cv_mean.reveal())
 
 if __name__ == "__main__":
     main()
