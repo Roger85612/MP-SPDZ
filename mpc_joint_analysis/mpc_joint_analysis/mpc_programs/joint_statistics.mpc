@@ -1,0 +1,112 @@
+"""
+简化的联合统计MPC程序 - 基于simple_joint_statistics.mpc的成功模式
+仅保留基础统计计算，避免复杂函数定义
+"""
+
+from Compiler.types import sint, sfix, cint
+from Compiler.library import print_ln
+
+def main():
+    """主函数：计算简化的联合统计"""
+    
+    print_ln("=== 启动联合统计MPC程序 ===")
+    
+    # 参数设置
+    n_parties = 3
+    data_size = 100  # 每方100个数据点
+    
+    print_ln("参数: %s 方, 每方 %s 数据点", n_parties, data_size)
+    
+    # 读取输入数据
+    print_ln("读取各方输入数据...")
+    
+    # 存储所有数据
+    data_x = []  # X变量数据（信用评分）
+    data_y = []  # Y变量数据（收入，百美元单位）
+    
+    # 从每个参与方读取数据
+    for party_id in range(n_parties):
+        print_ln("读取参与方 %s 的数据", party_id)
+        
+        # 读取X变量数据（信用评分）
+        for i in range(data_size):
+            x_val = sint.get_input_from(party_id)
+            data_x.append(x_val)
+        
+        # 读取Y变量数据（收入，百美元单位）
+        for i in range(data_size):
+            y_raw = sint.get_input_from(party_id)  # 百美元单位
+            y_scaled = sfix(y_raw)  # 转换为sfix类型
+            data_y.append(y_scaled)
+        
+        print_ln("参与方 %s 数据读取完成", party_id)
+    
+    print_ln("所有输入数据读取完成")
+    
+    # 计算X的统计量（信用评分）
+    print_ln("计算X变量统计量...")
+    
+    # 计算X的总和
+    sum_x = sint(0)
+    for x in data_x:
+        sum_x = sum_x + x
+    
+    # 计算X的均值
+    total_count = n_parties * data_size
+    mean_x = sum_x / total_count
+    
+    # 计算Y的统计量（收入）
+    print_ln("计算Y变量统计量...")
+    
+    # 计算Y的总和
+    sum_y = sfix(0)
+    for y in data_y:
+        sum_y = sum_y + y
+    
+    # 计算Y的均值
+    mean_y_scaled = sum_y / sfix(total_count)
+    
+    # 计算X的方差
+    print_ln("计算X变量方差...")
+    
+    sum_sq_diff_x = sint(0)
+    for x in data_x:
+        diff = x - mean_x
+        sum_sq_diff_x = sum_sq_diff_x + diff * diff
+    
+    variance_x = sum_sq_diff_x / (total_count - 1)
+    
+    # 计算Y的方差
+    print_ln("计算Y变量方差...")
+    
+    sum_sq_diff_y = sfix(0)
+    for y in data_y:
+        diff = y - mean_y_scaled
+        sum_sq_diff_y = sum_sq_diff_y + diff * diff
+    
+    variance_y_scaled = sum_sq_diff_y / sfix(total_count - 1)
+    
+    # 计算协方差
+    print_ln("计算X-Y协方差...")
+    
+    sum_cov = sfix(0)
+    for i in range(len(data_x)):
+        diff_x = sfix(data_x[i]) - sfix(mean_x)
+        diff_y = data_y[i] - mean_y_scaled
+        sum_cov = sum_cov + diff_x * diff_y
+    
+    covariance_scaled = sum_cov / sfix(total_count - 1)
+    
+    # 输出业务披露格式的结果
+    print_ln("=== BUSINESS_DISCLOSURE ===")
+    print_ln("BUSINESS_DISCLOSURE - Mean X (Credit Score): %s", mean_x.reveal())
+    print_ln("BUSINESS_DISCLOSURE - Mean Y (Income, 100 USD): %s", mean_y_scaled.reveal())
+    print_ln("BUSINESS_DISCLOSURE - Variance X: %s", variance_x.reveal())
+    print_ln("BUSINESS_DISCLOSURE - Variance Y: %s", variance_y_scaled.reveal())
+    print_ln("BUSINESS_DISCLOSURE - Covariance X-Y: %s", covariance_scaled.reveal())
+    print_ln("=== END_BUSINESS_DISCLOSURE ===")
+    
+    print_ln("=== 联合统计MPC程序执行完成 ===")
+
+# 执行主函数
+main()

@@ -1,0 +1,577 @@
+"""
+Joint Regression MPC Program
+
+This program implements secure multi-party linear and logistic regression
+algorithms. It allows multiple parties to collaboratively train regression
+models without revealing their individual datasets.
+
+Features:
+- Secure Linear Regression (Ordinary Least Squares)
+- Secure Logistic Regression (Maximum Likelihood)
+- Secure Ridge Regression (L2 regularization)
+- Secure Model Evaluation (R², accuracy, etc.)
+- Privacy-preserving feature selection
+"""
+
+from Compiler.types import sint, sfix, cint, cfix, Array, Matrix
+from Compiler.library import print_ln, for_range, if_
+from Compiler.util import if_else
+from Compiler.mpc_math import atan, sqrt
+from Compiler.mpc_math import log_fx as log, exp2_fx as exp
+
+# Configuration parameters
+MAX_PARTIES = 10
+MAX_FEATURES = 50
+MAX_SAMPLES = 1000
+PRECISION_BITS = 16
+LEARNING_RATE = sfix(0.01)
+MAX_ITERATIONS = 100
+CONVERGENCE_THRESHOLD = sfix(1e-6)
+
+def secure_matrix_multiply(A, B, rows_A, cols_A, cols_B):
+    """
+    Secure matrix multiplication: C = A * B
+    
+    Args:
+        A: Matrix A (rows_A x cols_A)
+        B: Matrix B (cols_A x cols_B)
+        rows_A: Number of rows in A
+        cols_A: Number of columns in A (= rows in B)
+        cols_B: Number of columns in B
+    
+    Returns:
+        Result matrix C (rows_A x cols_B)
+    """
+    C = Matrix(rows_A, cols_B, sfix)
+    
+    for i in range(rows_A):
+        for j in range(cols_B):
+            C[i][j] = sfix(0)
+            for k in range(cols_A):
+                C[i][j] += A[i][k] * B[k][j]
+    
+    return C
+
+def secure_matrix_transpose(A, rows, cols):
+    """
+    Secure matrix transpose: A_T = A^T
+    
+    Args:
+        A: Input matrix (rows x cols)
+        rows: Number of rows
+        cols: Number of columns
+    
+    Returns:
+        Transposed matrix (cols x rows)
+    """
+    A_T = Matrix(cols, rows, sfix)
+    
+    for i in range(rows):
+        for j in range(cols):
+            A_T[j][i] = A[i][j]
+    
+    return A_T
+
+def secure_matrix_inverse(A, n):
+    """
+    Secure matrix inversion using Gauss-Jordan elimination.
+    Note: This is a simplified implementation. In practice, you'd use
+    more numerically stable methods.
+    
+    Args:
+        A: Square matrix (n x n)
+        n: Matrix dimension
+    
+    Returns:
+        Inverse matrix
+    """
+    # Create augmented matrix [A | I]
+    augmented = Matrix(n, 2*n, sfix)
+    
+    # Fill augmented matrix
+    for i in range(n):
+        for j in range(n):
+            augmented[i][j] = A[i][j]
+            augmented[i][j + n] = sfix(1) if i == j else sfix(0)
+    
+    # Gauss-Jordan elimination
+    for i in range(n):
+        # Find pivot
+        pivot = augmented[i][i]
+        
+        # Scale row i
+        for j in range(2 * n):
+            augmented[i][j] = augmented[i][j] / pivot
+        
+        # Eliminate column i in other rows
+        for k in range(n):
+            if k != i:
+                factor = augmented[k][i]
+                for j in range(2 * n):
+                    augmented[k][j] = augmented[k][j] - factor * augmented[i][j]
+    
+    # Extract inverse matrix
+    inverse = Matrix(n, n, sfix)
+    for i in range(n):
+        for j in range(n):
+            inverse[i][j] = augmented[i][j + n]
+    
+    return inverse
+
+def secure_linear_regression(X, y, n_samples, n_features):
+    """
+    Secure linear regression using Normal Equations: β = (X^T X)^(-1) X^T y
+    
+    Args:
+        X: Feature matrix (n_samples x n_features)
+        y: Target vector (n_samples x 1)
+        n_samples: Number of samples
+        n_features: Number of features
+    
+    Returns:
+        Regression coefficients β
+    """
+    print_ln("Computing secure linear regression...")
+    
+    # Compute X^T
+    X_T = secure_matrix_transpose(X, n_samples, n_features)
+    
+    # Compute X^T * X
+    XTX = secure_matrix_multiply(X_T, X, n_features, n_samples, n_features)
+    
+    # Compute (X^T * X)^(-1)
+    XTX_inv = secure_matrix_inverse(XTX, n_features)
+    
+    # Compute X^T * y
+    XTy = Matrix(n_features, 1, sfix)
+    for i in range(n_features):
+        XTy[i][0] = sfix(0)
+        for j in range(n_samples):
+            XTy[i][0] += X_T[i][j] * y[j]
+    
+    # Compute β = (X^T * X)^(-1) * X^T * y
+    beta = secure_matrix_multiply(XTX_inv, XTy, n_features, n_features, 1)
+    
+    return beta
+
+def secure_ridge_regression(X, y, n_samples, n_features, lambda_reg):
+    """
+    Secure ridge regression with L2 regularization:
+    β = (X^T X + λI)^(-1) X^T y
+    
+    Args:
+        X: Feature matrix (n_samples x n_features)
+        y: Target vector (n_samples)
+        n_samples: Number of samples
+        n_features: Number of features
+        lambda_reg: Regularization parameter
+    
+    Returns:
+        Regularized regression coefficients
+    """
+    print_ln("Computing secure ridge regression...")
+    
+    # Compute X^T
+    X_T = secure_matrix_transpose(X, n_samples, n_features)
+    
+    # Compute X^T * X
+    XTX = secure_matrix_multiply(X_T, X, n_features, n_samples, n_features)
+    
+    # Add regularization: X^T * X + λI
+    for i in range(n_features):
+        XTX[i][i] += lambda_reg
+    
+    # Compute (X^T * X + λI)^(-1)
+    XTX_lambda_inv = secure_matrix_inverse(XTX, n_features)
+    
+    # Compute X^T * y
+    XTy = Matrix(n_features, 1, sfix)
+    for i in range(n_features):
+        XTy[i][0] = sfix(0)
+        for j in range(n_samples):
+            XTy[i][0] += X_T[i][j] * y[j]
+    
+    # Compute β = (X^T * X + λI)^(-1) * X^T * y
+    beta = secure_matrix_multiply(XTX_lambda_inv, XTy, n_features, n_features, 1)
+    
+    return beta
+
+def secure_sigmoid(x):
+    """
+    Secure sigmoid function approximation.
+    Uses polynomial approximation for efficiency.
+    
+    Args:
+        x: Input value
+    
+    Returns:
+        Sigmoid(x) ≈ 1 / (1 + exp(-x))
+    """
+    # Polynomial approximation of sigmoid for |x| <= 5
+    # sigmoid(x) ≈ 0.5 + 0.197 * x - 0.004 * x^3 (for small x)
+    
+    x_clamped = if_else(x > 5, sfix(5), if_else(x < -5, sfix(-5), x))
+    
+    # Use more accurate approximation
+    # sigmoid(x) ≈ 0.5 * (x / (1 + |x|)) + 0.5
+    abs_x = if_else(x_clamped >= 0, x_clamped, -x_clamped)
+    sigmoid_approx = sfix(0.5) * (x_clamped / (sfix(1) + abs_x)) + sfix(0.5)
+    
+    return sigmoid_approx
+
+def secure_logistic_regression(X, y, n_samples, n_features, learning_rate, max_iterations):
+    """
+    Secure logistic regression using gradient descent.
+    
+    Args:
+        X: Feature matrix (n_samples x n_features)
+        y: Binary target vector (n_samples)
+        n_samples: Number of samples
+        n_features: Number of features
+        learning_rate: Learning rate for gradient descent
+        max_iterations: Maximum number of iterations
+    
+    Returns:
+        Logistic regression coefficients
+    """
+    print_ln("Computing secure logistic regression...")
+    
+    # Initialize coefficients
+    beta = Array(n_features, sfix)
+    for i in range(n_features):
+        beta[i] = sfix(0)
+    
+    # Gradient descent
+    for iteration in range(max_iterations):
+        
+        # Compute predictions: p = sigmoid(X * β)
+        predictions = Array(n_samples, sfix)
+        for i in range(n_samples):
+            linear_combination = sfix(0)
+            for j in range(n_features):
+                linear_combination += X[i][j] * beta[j]
+            predictions[i] = secure_sigmoid(linear_combination)
+        
+        # Compute gradient: ∇L = X^T * (p - y)
+        gradient = Array(n_features, sfix)
+        for j in range(n_features):
+            gradient[j] = sfix(0)
+            for i in range(n_samples):
+                error = predictions[i] - y[i]
+                gradient[j] += X[i][j] * error
+            gradient[j] = gradient[j] / n_samples
+        
+        # Update coefficients: β = β - α * ∇L
+        for j in range(n_features):
+            beta[j] = beta[j] - learning_rate * gradient[j]
+        
+        # Check convergence (every 10 iterations)
+        if iteration % 10 == 0:
+            gradient_norm = sfix(0)
+            for j in range(n_features):
+                gradient_norm += gradient[j] * gradient[j]
+            
+            # Simple convergence check
+            convergence_check = gradient_norm < CONVERGENCE_THRESHOLD
+            print_ln("Iteration %s, Gradient norm: %s", iteration, gradient_norm.reveal())
+    
+    return beta
+
+def secure_predict_linear(X_test, beta, n_test_samples, n_features):
+    """
+    Make predictions using linear regression model.
+    
+    Args:
+        X_test: Test feature matrix
+        beta: Regression coefficients
+        n_test_samples: Number of test samples
+        n_features: Number of features
+    
+    Returns:
+        Predictions
+    """
+    predictions = Array(n_test_samples, sfix)
+    
+    for i in range(n_test_samples):
+        prediction = sfix(0)
+        for j in range(n_features):
+            prediction += X_test[i][j] * beta[j][0]
+        predictions[i] = prediction
+    
+    return predictions
+
+def secure_predict_logistic(X_test, beta, n_test_samples, n_features):
+    """
+    Make predictions using logistic regression model.
+    
+    Args:
+        X_test: Test feature matrix
+        beta: Regression coefficients
+        n_test_samples: Number of test samples
+        n_features: Number of features
+    
+    Returns:
+        Probability predictions
+    """
+    predictions = Array(n_test_samples, sfix)
+    
+    for i in range(n_test_samples):
+        linear_combination = sfix(0)
+        for j in range(n_features):
+            linear_combination += X_test[i][j] * beta[j]
+        predictions[i] = secure_sigmoid(linear_combination)
+    
+    return predictions
+
+def secure_r_squared(y_true, y_pred, n_samples):
+    """
+    Compute R² (coefficient of determination) for regression.
+    
+    Args:
+        y_true: True target values
+        y_pred: Predicted values
+        n_samples: Number of samples
+    
+    Returns:
+        R² score
+    """
+    # Compute mean of true values
+    y_mean = sfix(0)
+    for i in range(n_samples):
+        y_mean += y_true[i]
+    y_mean = y_mean / n_samples
+    
+    # Compute total sum of squares (TSS)
+    tss = sfix(0)
+    for i in range(n_samples):
+        diff = y_true[i] - y_mean
+        tss += diff * diff
+    
+    # Compute residual sum of squares (RSS)
+    rss = sfix(0)
+    for i in range(n_samples):
+        diff = y_true[i] - y_pred[i]
+        rss += diff * diff
+    
+    # R² = 1 - RSS/TSS
+    r_squared = sfix(1) - (rss / tss)
+    return r_squared
+
+def secure_accuracy(y_true, y_pred_prob, n_samples, threshold):
+    """
+    Compute classification accuracy for logistic regression.
+    
+    Args:
+        y_true: True binary labels
+        y_pred_prob: Predicted probabilities
+        n_samples: Number of samples
+        threshold: Classification threshold (default 0.5)
+    
+    Returns:
+        Accuracy score
+    """
+    correct_predictions = sint(0)
+    
+    for i in range(n_samples):
+        # Convert probability to binary prediction
+        y_pred_binary = if_else(y_pred_prob[i] >= threshold, sfix(1), sfix(0))
+        
+        # Check if prediction is correct
+        is_correct = if_else(y_pred_binary == y_true[i], 1, 0)
+        correct_predictions += is_correct
+    
+    accuracy = sfix(correct_predictions) / n_samples
+    return accuracy
+
+def secure_feature_selection(X, y, n_samples, n_features, selection_method):
+    """
+    Secure feature selection using correlation-based methods.
+    
+    Args:
+        X: Feature matrix
+        y: Target vector
+        n_samples: Number of samples
+        n_features: Number of features
+        selection_method: Selection method (0: correlation, 1: variance)
+    
+    Returns:
+        Feature importance scores
+    """
+    feature_scores = Array(n_features, sfix)
+    
+    if selection_method == 0:  # Correlation-based selection
+        # Compute correlation between each feature and target
+        for j in range(n_features):
+            # Compute mean of feature j
+            feature_mean = sfix(0)
+            for i in range(n_samples):
+                feature_mean += X[i][j]
+            feature_mean = feature_mean / n_samples
+            
+            # Compute mean of target
+            target_mean = sfix(0)
+            for i in range(n_samples):
+                target_mean += y[i]
+            target_mean = target_mean / n_samples
+            
+            # Compute covariance and variances
+            covariance = sfix(0)
+            feature_var = sfix(0)
+            target_var = sfix(0)
+            
+            for i in range(n_samples):
+                feature_diff = X[i][j] - feature_mean
+                target_diff = y[i] - target_mean
+                
+                covariance += feature_diff * target_diff
+                feature_var += feature_diff * feature_diff
+                target_var += target_diff * target_diff
+            
+            # Compute correlation coefficient
+            correlation = covariance / (feature_var.sqrt() * target_var.sqrt())
+            feature_scores[j] = correlation * correlation  # Use squared correlation
+    
+    else:  # Variance-based selection
+        for j in range(n_features):
+            # Compute variance of feature j
+            feature_mean = sfix(0)
+            for i in range(n_samples):
+                feature_mean += X[i][j]
+            feature_mean = feature_mean / n_samples
+            
+            feature_var = sfix(0)
+            for i in range(n_samples):
+                diff = X[i][j] - feature_mean
+                feature_var += diff * diff
+            feature_var = feature_var / (n_samples - 1)
+            
+            feature_scores[j] = feature_var
+    
+    return feature_scores
+
+def secure_cross_validation(X, y, n_samples, n_features, n_folds):
+    """
+    Perform secure k-fold cross-validation for model evaluation.
+    
+    Args:
+        X: Feature matrix
+        y: Target vector
+        n_samples: Number of samples
+        n_features: Number of features
+        n_folds: Number of folds
+    
+    Returns:
+        Cross-validation scores
+    """
+    fold_size = n_samples // n_folds
+    cv_scores = Array(n_folds, sfix)
+    
+    for fold in range(n_folds):
+        # Define train/test split for this fold
+        test_start = fold * fold_size
+        test_end = test_start + fold_size
+        
+        # Create training data (excluding test fold)
+        train_size = n_samples - fold_size
+        X_train = Matrix(train_size, n_features, sfix)
+        y_train = Array(train_size, sfix)
+        
+        train_idx = 0
+        for i in range(n_samples):
+            if i < test_start or i >= test_end:  # Training data
+                for j in range(n_features):
+                    X_train[train_idx][j] = X[i][j]
+                y_train[train_idx] = y[i]
+                train_idx += 1
+        
+        # Train model on training fold
+        beta = secure_linear_regression(X_train, y_train, train_size, n_features)
+        
+        # Create test data
+        X_test = Matrix(fold_size, n_features, sfix)
+        y_test = Array(fold_size, sfix)
+        
+        for i in range(fold_size):
+            test_idx = test_start + i
+            for j in range(n_features):
+                X_test[i][j] = X[test_idx][j]
+            y_test[i] = y[test_idx]
+        
+        # Make predictions on test fold
+        y_pred = secure_predict_linear(X_test, beta, fold_size, n_features)
+        
+        # Compute R² for this fold
+        cv_scores[fold] = secure_r_squared(y_test, y_pred, fold_size)
+    
+    return cv_scores
+
+def main():
+    """
+    Main function demonstrating joint regression analysis.
+    """
+    print_ln("Starting Joint Regression MPC Program")
+    
+    # Initialize parameters
+    n_parties = cint(3)
+    n_samples_per_party = cint(50)
+    n_features = cint(3)
+    total_samples = n_parties * n_samples_per_party
+    
+    print_ln("Configuration:")
+    print_ln("Number of parties: %s", n_parties)
+    print_ln("Samples per party: %s", n_samples_per_party)
+    print_ln("Total samples: %s", total_samples)
+    print_ln("Number of features: %s", n_features)
+    
+    # Initialize data structures
+    X = Matrix(total_samples, n_features, sfix)
+    y = Array(total_samples, sfix)
+    y_binary = Array(total_samples, sfix)  # For logistic regression
+    
+    # Input data from parties
+    print_ln("Reading input data from parties...")
+    for party in range(n_parties):
+        print_ln("Party %s providing data...", party)
+        
+        for sample in range(n_samples_per_party):
+            global_idx = party * n_samples_per_party + sample
+            
+            # Input features
+            for feature in range(n_features):
+                X[global_idx][feature] = sfix.get_input_from(party)
+            
+            # Input continuous target (for linear regression)
+            y[global_idx] = sfix.get_input_from(party)
+            
+            # Input binary target (for logistic regression)
+            y_binary[global_idx] = sfix.get_input_from(party)
+    
+    print_ln("Data input completed. Starting regression analysis...")
+    
+    # === LINEAR REGRESSION ===
+    print_ln("\n=== LINEAR REGRESSION ===")
+    
+    print_ln("=== BUSINESS DISCLOSURE - REGRESSION RESULTS ===")
+    
+    # Perform linear regression
+    linear_beta = secure_linear_regression(X, y, total_samples, n_features)
+    
+    print_ln("Linear Regression Coefficients:")
+    for i in range(n_features):
+        print_ln("BUSINESS_DISCLOSURE - Linear Beta[%s]: %s", i, linear_beta[i][0].reveal())
+    
+    # Make predictions
+    y_pred_linear = secure_predict_linear(X, linear_beta, total_samples, n_features)
+    
+    # Compute R²
+    r_squared = secure_r_squared(y, y_pred_linear, total_samples)
+    print_ln("BUSINESS_DISCLOSURE - Linear Regression R²: %s", r_squared.reveal())
+    
+    print_ln("=== BUSINESS MODEL PERFORMANCE SUMMARY ===")
+    print_ln("BUSINESS_DISCLOSURE - Model R²: %s", r_squared.reveal())
+    print_ln("Linear regression analysis completed successfully!")
+    
+    print_ln("\nJoint Regression analysis completed successfully!")
+
+if __name__ == "__main__":
+    main()
