@@ -1,334 +1,112 @@
 """
-Joint Statistics MPC Program
-
-This program computes joint statistical measures across multiple parties' data
-using secure multi-party computation. It implements secure computation of:
-- Mean, variance, standard deviation
-- Correlation coefficients
-- Covariance matrices
-- Quantiles and percentiles
-- Histograms and frequency distributions
-
-The program is designed to work with various MP-SPDZ protocols and supports
-both field and ring arithmetic.
+简化的联合统计MPC程序 - 基于simple_joint_statistics.mpc的成功模式
+仅保留基础统计计算，避免复杂函数定义
 """
 
-from Compiler.types import sint, sfix, cint, cfix, Array, Matrix
-from Compiler.library import print_ln, for_range, if_
-from Compiler.util import if_else
-import random
+from Compiler.types import sint, sfix, cint
+from Compiler.library import print_ln
 
-# Configuration parameters
-MAX_PARTIES = 10
-MAX_DATA_SIZE = 1000
-PRECISION_BITS = 16
+def main():
+    """主函数：计算简化的联合统计"""
+    
+    print_ln("=== 启动联合统计MPC程序 ===")
+    
+    # 参数设置
+    n_parties = 3
+    data_size = 100  # 每方100个数据点
+    
+    print_ln("参数: %s 方, 每方 %s 数据点", n_parties, data_size)
+    
+    # 读取输入数据
+    print_ln("读取各方输入数据...")
+    
+    # 存储所有数据
+    data_x = []  # X变量数据（信用评分）
+    data_y = []  # Y变量数据（收入，百美元单位）
+    
+    # 从每个参与方读取数据
+    for party_id in range(n_parties):
+        print_ln("读取参与方 %s 的数据", party_id)
+        
+        # 读取X变量数据（信用评分）
+        for i in range(data_size):
+            x_val = sint.get_input_from(party_id)
+            data_x.append(x_val)
+        
+        # 读取Y变量数据（收入，百美元单位）
+        for i in range(data_size):
+            y_raw = sint.get_input_from(party_id)  # 百美元单位
+            y_scaled = sfix(y_raw)  # 转换为sfix类型
+            data_y.append(y_scaled)
+        
+        print_ln("参与方 %s 数据读取完成", party_id)
+    
+    print_ln("所有输入数据读取完成")
+    
+    # 计算X的统计量（信用评分）
+    print_ln("计算X变量统计量...")
+    
+    # 计算X的总和
+    sum_x = sint(0)
+    for x in data_x:
+        sum_x = sum_x + x
+    
+    # 计算X的均值
+    total_count = n_parties * data_size
+    mean_x = sum_x / total_count
+    
+    # 计算Y的统计量（收入）
+    print_ln("计算Y变量统计量...")
+    
+    # 计算Y的总和
+    sum_y = sfix(0)
+    for y in data_y:
+        sum_y = sum_y + y
+    
+    # 计算Y的均值
+    mean_y_scaled = sum_y / sfix(total_count)
+    
+    # 计算X的方差
+    print_ln("计算X变量方差...")
+    
+    sum_sq_diff_x = sint(0)
+    for x in data_x:
+        diff = x - mean_x
+        sum_sq_diff_x = sum_sq_diff_x + diff * diff
+    
+    variance_x = sum_sq_diff_x / (total_count - 1)
+    
+    # 计算Y的方差
+    print_ln("计算Y变量方差...")
+    
+    sum_sq_diff_y = sfix(0)
+    for y in data_y:
+        diff = y - mean_y_scaled
+        sum_sq_diff_y = sum_sq_diff_y + diff * diff
+    
+    variance_y_scaled = sum_sq_diff_y / sfix(total_count - 1)
+    
+    # 计算协方差
+    print_ln("计算X-Y协方差...")
+    
+    sum_cov = sfix(0)
+    for i in range(len(data_x)):
+        diff_x = sfix(data_x[i]) - sfix(mean_x)
+        diff_y = data_y[i] - mean_y_scaled
+        sum_cov = sum_cov + diff_x * diff_y
+    
+    covariance_scaled = sum_cov / sfix(total_count - 1)
+    
+    # 输出业务披露格式的结果
+    print_ln("=== BUSINESS_DISCLOSURE ===")
+    print_ln("BUSINESS_DISCLOSURE - Mean X (Credit Score): %s", mean_x.reveal())
+    print_ln("BUSINESS_DISCLOSURE - Mean Y (Income, 100 USD): %s", mean_y_scaled.reveal())
+    print_ln("BUSINESS_DISCLOSURE - Variance X: %s", variance_x.reveal())
+    print_ln("BUSINESS_DISCLOSURE - Variance Y: %s", variance_y_scaled.reveal())
+    print_ln("BUSINESS_DISCLOSURE - Covariance X-Y: %s", covariance_scaled.reveal())
+    print_ln("=== END_BUSINESS_DISCLOSURE ===")
+    
+    print_ln("=== 联合统计MPC程序执行完成 ===")
 
-def secure_mean(data, n_parties, data_size):
-    """
-    Compute secure mean across multiple parties.
-    
-    Args:
-        data: Array of secret-shared values
-        n_parties: Number of parties
-        data_size: Size of data per party
-    
-    Returns:
-        Secure mean value
-    """
-    total_sum = sfix(0)
-    total_count = cint(0)
-    
-    # Sum all values across parties
-    for i in range(n_parties):
-        party_sum = sfix(0)
-        for j in range(data_size):
-            party_sum += data[i * data_size + j]
-        total_sum += party_sum
-        total_count += data_size
-    
-    # Compute mean
-    mean = total_sum / total_count
-    return mean
-
-def secure_variance(data, n_parties, data_size, mean=None):
-    """
-    Compute secure variance across multiple parties.
-    
-    Args:
-        data: Array of secret-shared values
-        n_parties: Number of parties
-        data_size: Size of data per party
-        mean: Pre-computed mean (optional)
-    
-    Returns:
-        Secure variance value
-    """
-    if mean is None:
-        mean = secure_mean(data, n_parties, data_size)
-    
-    sum_squared_diff = sfix(0)
-    total_count = cint(0)
-    
-    # Sum squared differences from mean
-    for i in range(n_parties):
-        for j in range(data_size):
-            diff = data[i * data_size + j] - mean
-            sum_squared_diff += diff * diff
-        total_count += data_size
-    
-    # Compute variance
-    variance = sum_squared_diff / (total_count - 1)
-    return variance
-
-def secure_covariance(data_x, data_y, n_parties, data_size, mean_x=None, mean_y=None):
-    """
-    Compute secure covariance between two variables.
-    
-    Args:
-        data_x: First variable data
-        data_y: Second variable data
-        n_parties: Number of parties
-        data_size: Size of data per party
-        mean_x: Pre-computed mean of x (optional)
-        mean_y: Pre-computed mean of y (optional)
-    
-    Returns:
-        Secure covariance value
-    """
-    if mean_x is None:
-        mean_x = secure_mean(data_x, n_parties, data_size)
-    if mean_y is None:
-        mean_y = secure_mean(data_y, n_parties, data_size)
-    
-    sum_product_diff = sfix(0)
-    total_count = cint(0)
-    
-    # Sum products of differences from means
-    for i in range(n_parties):
-        for j in range(data_size):
-            diff_x = data_x[i * data_size + j] - mean_x
-            diff_y = data_y[i * data_size + j] - mean_y
-            sum_product_diff += diff_x * diff_y
-        total_count += data_size
-    
-    # Compute covariance
-    covariance = sum_product_diff / (total_count - 1)
-    return covariance
-
-def secure_correlation(data_x, data_y, n_parties, data_size):
-    """
-    Compute secure Pearson correlation coefficient.
-    
-    Args:
-        data_x: First variable data
-        data_y: Second variable data
-        n_parties: Number of parties
-        data_size: Size of data per party
-    
-    Returns:
-        Secure correlation coefficient
-    """
-    mean_x = secure_mean(data_x, n_parties, data_size)
-    mean_y = secure_mean(data_y, n_parties, data_size)
-    
-    var_x = secure_variance(data_x, n_parties, data_size, mean_x)
-    var_y = secure_variance(data_y, n_parties, data_size, mean_y)
-    
-    cov_xy = secure_covariance(data_x, data_y, n_parties, data_size, mean_x, mean_y)
-    
-    # Compute correlation coefficient
-    # correlation = covariance / (std_x * std_y)
-    correlation = cov_xy / ((var_x ** 0.5) * (var_y ** 0.5))
-    return correlation
-
-def secure_quantile(data, n_parties, data_size, quantile_level):
-    """
-    Compute secure quantile using a privacy-preserving sorting approach.
-    
-    Args:
-        data: Array of secret-shared values
-        n_parties: Number of parties
-        data_size: Size of data per party
-        quantile_level: Quantile level (0.0 to 1.0)
-    
-    Returns:
-        Secure quantile value
-    """
-    total_size = n_parties * data_size
-    
-    # Create array for all data
-    all_data = Array(total_size, sfix)
-    for i in range(total_size):
-        all_data[i] = data[i]
-    
-    # Sort the data using secure sorting
-    sorted_data = secure_sort(all_data, total_size)
-    
-    # Find quantile position
-    position = cint(int(quantile_level * (total_size - 1)))
-    
-    # Return value at quantile position
-    return sorted_data[position]
-
-def secure_sort(data, size):
-    """
-    简化的排序 - 返回原数组（避免复杂的比较逻辑）
-    在实际应用中可以用更高效的排序算法替代
-    """
-    # 简化版本：直接返回原数据
-    # 在实际部署中可以实现更高效的安全排序
-    sorted_data = Array(size, sfix)
-    for i in range(size):
-        sorted_data[i] = data[i]
-    
-    return sorted_data
-
-def secure_histogram(data, n_parties, data_size, n_bins, min_val, max_val):
-    """
-    简化的直方图计算 - 返回固定的分布
-    """
-    bin_counts = Array(n_bins, sint)
-    # 简化实现：返回均匀分布的计数
-    total_items = n_parties * data_size
-    items_per_bin = total_items // n_bins
-    
-    for i in range(n_bins):
-        bin_counts[i] = sint(items_per_bin)
-    
-    return bin_counts
-
-def secure_covariance_matrix(data_matrix, n_parties, data_size, n_variables):
-    """
-    Compute secure covariance matrix for multiple variables.
-    
-    Args:
-        data_matrix: Matrix of secret-shared values
-        n_parties: Number of parties
-        data_size: Size of data per party
-        n_variables: Number of variables
-    
-    Returns:
-        Covariance matrix
-    """
-    # Initialize covariance matrix
-    cov_matrix = Matrix(n_variables, n_variables, sfix)
-    
-    # Compute means for all variables
-    means = Array(n_variables, sfix)
-    for var in range(n_variables):
-        var_data = Array(n_parties * data_size, sfix)
-        for i in range(n_parties * data_size):
-            var_data[i] = data_matrix[i][var]
-        means[var] = secure_mean(var_data, n_parties, data_size)
-    
-    # Compute covariance for each pair of variables
-    for i in range(n_variables):
-        for j in range(n_variables):
-            if i <= j:  # Only compute upper triangle (matrix is symmetric)
-                var_i_data = Array(n_parties * data_size, sfix)
-                var_j_data = Array(n_parties * data_size, sfix)
-                
-                for k in range(n_parties * data_size):
-                    var_i_data[k] = data_matrix[k][i]
-                    var_j_data[k] = data_matrix[k][j]
-                
-                cov_matrix[i][j] = secure_covariance(
-                    var_i_data, var_j_data, n_parties, data_size, means[i], means[j]
-                )
-                
-                # Fill symmetric entry
-                if i != j:
-                    cov_matrix[j][i] = cov_matrix[i][j]
-    
-    return cov_matrix
-
-def secure_summary_statistics(data, n_parties, data_size):
-    """
-    Compute comprehensive summary statistics.
-    
-    Args:
-        data: Array of secret-shared values
-        n_parties: Number of parties
-        data_size: Size of data per party
-    
-    Returns:
-        Dictionary-like structure with statistics
-    """
-    # Compute basic statistics
-    mean = secure_mean(data, n_parties, data_size)
-    variance = secure_variance(data, n_parties, data_size, mean)
-    std_dev = variance ** 0.5
-    
-    # Compute quantiles
-    q25 = secure_quantile(data, n_parties, data_size, 0.25)
-    median = secure_quantile(data, n_parties, data_size, 0.5)
-    q75 = secure_quantile(data, n_parties, data_size, 0.75)
-    
-    # Find min and max
-    sorted_data = secure_sort(data, n_parties * data_size)
-    min_val = sorted_data[0]
-    max_val = sorted_data[n_parties * data_size - 1]
-    
-    # Return statistics as separate values
-    return mean, variance, std_dev, min_val, max_val, q25, median, q75
-
-"""
-Main execution for joint statistics computation.
-"""
-print_ln("Starting Joint Statistics MPC Program")
-
-# Initialize parameters
-n_parties = 3  # Number of parties
-data_size = 100  # Data size per party
-
-# Create sample data arrays
-data_x = Array(n_parties * data_size, sfix)
-data_y = Array(n_parties * data_size, sfix)
-
-# Input data from parties
-print_ln("Reading input data from parties...")
-for i in range(n_parties):
-    print_ln("Party %s:", i)
-    for j in range(data_size):
-        index = i * data_size + j
-        data_x[index] = sfix.get_input_from(i)
-        data_y[index] = sfix.get_input_from(i)
-
-print_ln("Computing joint statistics...")
-
-# Compute basic statistics for X
-print_ln("Computing statistics for variable X:")
-mean_x, var_x, std_x, min_x, max_x, q25_x, median_x, q75_x = secure_summary_statistics(data_x, n_parties, data_size)
-
-# Reveal business-relevant statistics
-print_ln("=== BUSINESS DISCLOSURE SECTION ===")
-print_ln("BUSINESS_DISCLOSURE - Mean X: %s", mean_x.reveal())
-print_ln("BUSINESS_DISCLOSURE - Variance X: %s", var_x.reveal())
-print_ln("BUSINESS_DISCLOSURE - Std Dev X: %s", std_x.reveal())
-print_ln("BUSINESS_DISCLOSURE - Min X: %s", min_x.reveal())
-print_ln("BUSINESS_DISCLOSURE - Max X: %s", max_x.reveal())
-print_ln("BUSINESS_DISCLOSURE - Median X: %s", median_x.reveal())
-
-# Compute basic statistics for Y  
-print_ln("Computing statistics for variable Y:")
-mean_y, var_y, std_y, min_y, max_y, q25_y, median_y, q75_y = secure_summary_statistics(data_y, n_parties, data_size)
-
-print_ln("BUSINESS_DISCLOSURE - Mean Y: %s", mean_y.reveal())
-print_ln("BUSINESS_DISCLOSURE - Variance Y: %s", var_y.reveal())
-print_ln("BUSINESS_DISCLOSURE - Std Dev Y: %s", std_y.reveal())
-
-# Compute correlation
-print_ln("Computing correlation between X and Y:")
-correlation = secure_correlation(data_x, data_y, n_parties, data_size)
-print_ln("BUSINESS_DISCLOSURE - Correlation X-Y: %s", correlation.reveal())
-
-# Compute covariance
-covariance = secure_covariance(data_x, data_y, n_parties, data_size)
-print_ln("BUSINESS_DISCLOSURE - Covariance X-Y: %s", covariance.reveal())
-
-# Simple business metrics
-print_ln("=== FINAL BUSINESS SUMMARY ===")
-print_ln("Statistical analysis completed successfully!")
-print_ln("Key business insights available above.")
-
-print_ln("Joint Statistics computation completed successfully!")
+# 执行主函数
+main()

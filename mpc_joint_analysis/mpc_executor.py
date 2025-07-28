@@ -42,42 +42,60 @@ class MPCProtocolExecutor:
         return True
     
     def run_mascot_offline_phase(self, n_parties: int = 3, program: str = "financial_risk_analysis"):
-        """运行MASCOT协议的预处理阶段（离线阶段）"""
+        """运行MASCOT协议的预处理阶段（离线阶段）- 所有参与方同时运行"""
         
-        logger.info("Starting MASCOT offline phase...")
+        logger.info("Starting MASCOT offline phase for all parties...")
         
         try:
-            # 正确的MASCOT预处理命令格式: ./mascot-offline.x [options] <program>
-            cmd = [
-                "./mascot-offline.x",
-                "-N", str(n_parties),
-                "-p", "0",  # 使用party 0进行预处理
-                program
-            ]
+            # 为每个参与方启动offline进程
+            processes = []
             
-            logger.info(f"Running offline phase: {' '.join(cmd)}")
+            for party_id in range(n_parties):
+                cmd = [
+                    "./mascot-offline.x",
+                    "-N", str(n_parties),
+                    "-p", str(party_id),
+                    program
+                ]
+                
+                logger.info(f"Starting offline Party {party_id}: {' '.join(cmd)}")
+                
+                # 启动进程
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    cwd=self.mp_spdz_path,
+                    text=True
+                )
+                processes.append((party_id, process))
             
-            # 运行预处理阶段
-            offline_process = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=120,  # 增加超时时间到2分钟
-                cwd=self.mp_spdz_path
-            )
+            # 等待所有进程完成
+            all_success = True
+            for party_id, process in processes:
+                try:
+                    stdout, stderr = process.communicate(timeout=120)
+                    returncode = process.returncode
+                    
+                    if returncode == 0:
+                        logger.info(f"Offline Party {party_id} completed successfully")
+                    else:
+                        logger.error(f"Offline Party {party_id} failed with code {returncode}")
+                        logger.error(f"Stderr: {stderr}")
+                        all_success = False
+                        
+                except subprocess.TimeoutExpired:
+                    logger.error(f"Offline Party {party_id} timed out")
+                    process.kill()
+                    all_success = False
             
-            if offline_process.returncode == 0:
-                logger.info("MASCOT offline phase completed successfully")
+            if all_success:
+                logger.info("MASCOT offline phase completed successfully for all parties")
                 return True
             else:
-                logger.error(f"MASCOT offline phase failed with code {offline_process.returncode}")
-                logger.error(f"Stderr: {offline_process.stderr}")
-                logger.error(f"Stdout: {offline_process.stdout}")
+                logger.error("MASCOT offline phase failed for one or more parties")
                 return False
                 
-        except subprocess.TimeoutExpired:
-            logger.error("MASCOT offline phase timed out")
-            return False
         except Exception as e:
             logger.error(f"MASCOT offline phase failed: {e}")
             return False
@@ -106,12 +124,12 @@ class MPCProtocolExecutor:
             
             logger.info(f"Starting Party {party_id}: {' '.join(cmd)}")
             
-            # 启动参与方进程
+            # 启动参与方进程 - 将stdout和stderr都写入输出文件
             with open(output_file, 'w') as f:
                 process = subprocess.Popen(
                     cmd,
                     stdout=f,
-                    stderr=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,  # 将stderr重定向到stdout
                     cwd=self.mp_spdz_path,
                     text=True
                 )
@@ -179,37 +197,37 @@ class MPCProtocolExecutor:
         
         try:
             # 解析BUSINESS_DISCLOSURE标记的结果
-            disclosure_lines = [line for line in output_text.split('\n') if 'BUSINESS_DISCLOSURE' in line]
+            disclosure_lines = [line for line in output_text.split('\n') if 'BUSINESS_DISCLOSURE' in line and ':' in line]
             logger.info(f"Found {len(disclosure_lines)} business disclosure lines")
             
             for line in disclosure_lines:
                 logger.info(f"Processing disclosure line: {line}")
                 
-                # 解析不同类型的披露
-                if "Total:" in line:
-                    total_match = re.search(r"Total:\s*([\d.-]+)", line)
-                    if total_match:
-                        parsed_results['total_customers'] = int(float(total_match.group(1)))
-                
-                elif "Mean:" in line:
-                    mean_match = re.search(r"Mean:\s*([\d.-]+)", line)
-                    if mean_match:
-                        parsed_results['mean_value'] = float(mean_match.group(1))
-                
-                elif "Average Credit Score:" in line:
-                    credit_match = re.search(r"Average Credit Score:\s*([\d.-]+)", line)
+                # 解析新的格式：BUSINESS_DISCLOSURE - Mean X (Credit Score): 725.3
+                if "Mean X (Credit Score):" in line:
+                    credit_match = re.search(r"Mean X \(Credit Score\):\s*([\d.-]+)", line)
                     if credit_match:
                         parsed_results['mean_credit_score'] = float(credit_match.group(1))
                 
-                elif "Average Default Risk:" in line:
-                    risk_match = re.search(r"Average Default Risk:\s*([\d.-]+)", line)
-                    if risk_match:
-                        parsed_results['mean_default_risk'] = float(risk_match.group(1))
+                elif "Mean Y (Income" in line:
+                    income_match = re.search(r"Mean Y \(Income.*?\):\s*([\d.-]+)", line)
+                    if income_match:
+                        parsed_results['mean_income'] = float(income_match.group(1))
                 
-                elif "High Risk Customers:" in line:
-                    high_risk_match = re.search(r"High Risk Customers:\s*(\d+)", line)
-                    if high_risk_match:
-                        parsed_results['high_risk_customers'] = int(high_risk_match.group(1))
+                elif "Variance X:" in line:
+                    var_x_match = re.search(r"Variance X:\s*([\d.-]+)", line)
+                    if var_x_match:
+                        parsed_results['variance_credit_score'] = float(var_x_match.group(1))
+                
+                elif "Variance Y" in line:
+                    var_y_match = re.search(r"Variance Y.*?:\s*([\d.-]+)", line)
+                    if var_y_match:
+                        parsed_results['variance_income'] = float(var_y_match.group(1))
+                
+                elif "Covariance X-Y" in line:
+                    cov_match = re.search(r"Covariance X-Y.*?:\s*([\d.-]+)", line)
+                    if cov_match:
+                        parsed_results['covariance_credit_income'] = float(cov_match.group(1))
             
             # 中文解析作为备用
             if not parsed_results:
@@ -245,7 +263,21 @@ class MPCProtocolExecutor:
                 'note': '协议执行成功但无法解析结果 - 未使用模拟数据'
             }
         
-        return parsed_results
+        # 解析成功，添加协议执行状态
+        final_results = {
+            'protocol_execution': 'SUCCESSFUL',
+            'success': True,
+            'protocol': 'MASCOT',
+            'n_parties': len(successful_results),
+            'program': 'joint_statistics',
+            'offline_phase': 'successful',
+            'online_phase_success': True
+        }
+        
+        # 合并解析的统计结果
+        final_results.update(parsed_results)
+        
+        return final_results
     
 # 已移除generate_fallback_results函数 - 不再提供模拟数据
     
