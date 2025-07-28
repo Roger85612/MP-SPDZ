@@ -1,0 +1,154 @@
+"""
+医疗机构联合研究MPC程序
+多中心药物疗效分析 - 保护患者隐私的安全计算
+三家医院：综合医院(心脏科)、研究医学中心(肿瘤科)、大学医院(神经科)
+"""
+
+from Compiler.types import sint, sfix, cint
+from Compiler.library import print_ln
+
+def main():
+    """医疗联合研究主函数"""
+    
+    print_ln("=== 启动医疗机构联合研究MPC程序 ===")
+    print_ln("多中心药物疗效分析 - 隐私保护安全计算")
+    
+    # 研究参数设置
+    n_hospitals = 3
+    patients_per_hospital = 50  # 每家医院50名患者
+    total_patients = n_hospitals * patients_per_hospital
+    
+    print_ln("研究参数: %s家医院, 每院%s名患者, 总计%s名患者", 
+             n_hospitals, patients_per_hospital, total_patients)
+    
+    # 数据存储结构
+    patient_ages = []           # 患者年龄
+    baseline_scores = []        # 基线健康评分 (0-100)
+    primary_outcomes = []       # 主要疗效指标 (0-100)
+    adverse_events = []         # 不良反应严重程度 (0-10)
+    
+    # 从各医院读取患者数据
+    print_ln("开始读取各医院患者数据...")
+    
+    for hospital_id in range(n_hospitals):
+        print_ln("读取医院 %s 的患者数据...", hospital_id)
+        
+        for patient_id in range(patients_per_hospital):
+            # 读取患者数据
+            age = sint.get_input_from(hospital_id)
+            baseline = sint.get_input_from(hospital_id)
+            outcome = sint.get_input_from(hospital_id)
+            adverse = sint.get_input_from(hospital_id)
+            
+            # 存储数据
+            patient_ages.append(age)
+            baseline_scores.append(baseline)
+            primary_outcomes.append(outcome)
+            adverse_events.append(adverse)
+        
+        print_ln("医院 %s 数据读取完成", hospital_id)
+    
+    print_ln("所有医院患者数据读取完成")
+    
+    # ============ 基础统计分析 ============
+    print_ln("开始进行基础统计分析...")
+    
+    # 计算患者年龄统计
+    sum_age = sint(0)
+    for age in patient_ages:
+        sum_age = sum_age + age
+    mean_age = sum_age / total_patients
+    
+    # 计算基线健康评分
+    sum_baseline = sint(0)
+    for score in baseline_scores:
+        sum_baseline = sum_baseline + score
+    mean_baseline = sum_baseline / total_patients
+    
+    # ============ 疗效分析 ============
+    print_ln("开始进行疗效分析...")
+    
+    # 计算主要疗效指标
+    sum_outcome = sint(0)
+    for outcome in primary_outcomes:
+        sum_outcome = sum_outcome + outcome
+    mean_outcome = sum_outcome / total_patients
+    
+    # 计算疗效改善程度
+    sum_improvement = sint(0)
+    for i in range(total_patients):
+        improvement = primary_outcomes[i] - baseline_scores[i]
+        sum_improvement = sum_improvement + improvement
+    mean_improvement = sum_improvement / total_patients
+    
+    # 计算有效率 (改善≥20分的患者比例)
+    effective_count = sint(0)
+    for i in range(total_patients):
+        improvement = primary_outcomes[i] - baseline_scores[i]
+        is_effective = (improvement >= 20)
+        effective_count = effective_count + is_effective
+    
+    effectiveness_rate = (effective_count * 100) / total_patients
+    
+    # ============ 安全性分析 ============
+    print_ln("开始进行安全性分析...")
+    
+    # 计算不良反应统计
+    sum_adverse = sint(0)
+    severe_adverse_count = sint(0)
+    for adverse in adverse_events:
+        sum_adverse = sum_adverse + adverse
+        is_severe = (adverse >= 7)
+        severe_adverse_count = severe_adverse_count + is_severe
+    
+    mean_adverse = sum_adverse / total_patients
+    severe_adverse_rate = (severe_adverse_count * 100) / total_patients
+    
+    # ============ 年龄分层分析 ============
+    print_ln("开始进行年龄分层分析...")
+    
+    # 统计不同年龄组的疗效
+    young_patients = sint(0)
+    middle_patients = sint(0)
+    elderly_patients = sint(0)
+    
+    young_outcome_sum = sint(0)
+    middle_outcome_sum = sint(0)
+    elderly_outcome_sum = sint(0)
+    
+    for i in range(total_patients):
+        age = patient_ages[i]
+        outcome = primary_outcomes[i]
+        
+        is_young = (age < 50)
+        is_middle = ((age >= 50) * (age <= 70))
+        is_elderly = (age > 70)
+        
+        young_patients = young_patients + is_young
+        middle_patients = middle_patients + is_middle
+        elderly_patients = elderly_patients + is_elderly
+        
+        young_outcome_sum = young_outcome_sum + (outcome * is_young)
+        middle_outcome_sum = middle_outcome_sum + (outcome * is_middle)
+        elderly_outcome_sum = elderly_outcome_sum + (outcome * is_elderly)
+    
+    # ============ 医疗研究结果披露 ============
+    print_ln("=== MEDICAL_DISCLOSURE ===")
+    print_ln("MEDICAL_DISCLOSURE - 平均年龄: %s", mean_age.reveal())
+    print_ln("MEDICAL_DISCLOSURE - 基线健康评分: %s", mean_baseline.reveal())
+    print_ln("MEDICAL_DISCLOSURE - 平均疗效指标: %s", mean_outcome.reveal())
+    print_ln("MEDICAL_DISCLOSURE - 平均疗效改善: %s", mean_improvement.reveal())
+    print_ln("MEDICAL_DISCLOSURE - 治疗有效率: %s", effectiveness_rate.reveal())
+    print_ln("MEDICAL_DISCLOSURE - 平均不良反应: %s", mean_adverse.reveal())
+    print_ln("MEDICAL_DISCLOSURE - 严重不良反应率: %s", severe_adverse_rate.reveal())
+    
+    # 年龄分层结果
+    print_ln("MEDICAL_DISCLOSURE - 年轻患者数: %s", young_patients.reveal())
+    print_ln("MEDICAL_DISCLOSURE - 中年患者数: %s", middle_patients.reveal())
+    print_ln("MEDICAL_DISCLOSURE - 老年患者数: %s", elderly_patients.reveal())
+    
+    print_ln("=== END_MEDICAL_DISCLOSURE ===")
+    print_ln("=== 医疗机构联合研究MPC程序执行完成 ===")
+
+# 执行主函数
+main()
